@@ -1,5 +1,6 @@
 import asyncio
 import typing
+from asyncio.tasks import Task
 
 from starlette.requests import Request
 from starlette.types import Receive, Scope, Send
@@ -65,11 +66,24 @@ class GraphQL:
 
         self._keep_alive_task = asyncio.create_task(self.handle_keep_alive(websocket))
 
+    async def stop_subscription(
+        self,
+        operation_id: str,
+        subscriptions: typing.Dict[str, typing.AsyncGenerator],
+        tasks: typing.Dict[str, Task],
+    ):
+        if operation_id not in subscriptions:
+            return
+
+        await subscriptions[operation_id].aclose()
+
+        tasks[operation_id].cancel()
+
     async def handle_websocket(self, scope: Scope, receive: Receive, send: Send):
         websocket = WebSocket(scope=scope, receive=receive, send=send)
 
         subscriptions: typing.Dict[str, typing.AsyncGenerator] = {}
-        tasks = {}
+        tasks: typing.Dict[str, Task] = {}
 
         await websocket.accept(subprotocol="graphql-ws")
 
@@ -103,23 +117,20 @@ class GraphQL:
                         self.handle_async_results(async_result, operation_id, websocket)
                     )
                 elif message_type == GQL_STOP:
-                    if operation_id not in subscriptions:
-                        return
+                    await self.stop_subscription(operation_id, subscriptions, tasks)
 
-                    await subscriptions[operation_id].aclose()
                     del subscriptions[operation_id]
-
-                    tasks[operation_id].cancel()
                     del tasks[operation_id]
+
         except WebSocketDisconnect:
             pass
+
         finally:
             if self._keep_alive_task:
                 self._keep_alive_task.cancel()
 
             for operation_id in subscriptions:
-                await subscriptions[operation_id].aclose()
-                tasks[operation_id].cancel()
+                await self.stop_subscription(operation_id, subscriptions, tasks)
 
     async def start_subscription(self, data, operation_id: str, websocket: WebSocket):
         query = data["query"]
