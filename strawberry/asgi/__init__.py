@@ -48,7 +48,7 @@ class GraphQL:
             await self.handle_http(scope=scope, receive=receive, send=send)
         elif scope["type"] == "websocket":
             await self.handle_websocket(scope=scope, receive=receive, send=send)
-        else:
+        else:  # pragma: no cover
             raise ValueError("Unknown scope type: %r" % (scope["type"],))
 
     async def get_root_value(self, request: Request) -> typing.Optional[typing.Any]:
